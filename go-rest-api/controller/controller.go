@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -23,18 +24,18 @@ func init() {
 	ActiveTokenDetails = make(map[string]TokenDetails)
 }
 
-func ValidateToken(c *gin.Context) error {
+func ValidateToken(c *gin.Context) (string, error) {
 	authHeader := c.GetHeader("Authorization")
 
 	if authHeader == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing"})
-		return errors.New("Authorization header missing")
+		return "", errors.New("Authorization header missing")
 	}
 
 	authHeaderParts := strings.Split(authHeader, " ")
 	if len(authHeaderParts) != 2 || authHeaderParts[0] != "Bearer" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authorization header format"})
-		return errors.New("Invalid authorization header format")
+		return "", errors.New("Invalid authorization header format")
 	}
 
 	uuidToken := authHeaderParts[1]
@@ -42,7 +43,7 @@ func ValidateToken(c *gin.Context) error {
 	_, err := uuid.Parse(uuidToken)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid token format"})
-		return errors.New("Invalid token format")
+		return "", errors.New("Invalid token format")
 	}
 
 	found := false
@@ -55,7 +56,8 @@ func ValidateToken(c *gin.Context) error {
 
 	if !found {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-		return errors.New("Invalid token")
+		return "", errors.New("Invalid token")
 	}
-	return nil
+	fmt.Println(uuidToken)
+	return uuidToken, nil
 }

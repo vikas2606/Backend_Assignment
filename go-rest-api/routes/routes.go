@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -96,13 +95,17 @@ func DeanLogin(c *gin.Context) {
 	}
 
 	controller.ActiveTokens = append(controller.ActiveTokens, uuidToken)
+	controller.ActiveTokenDetails[uuidToken] = controller.TokenDetails{
+		ID:       dean.ID,
+		Username: dean.Username,
+	}
 
 	http.SetCookie(c.Writer, &cookie)
 	c.JSON(http.StatusOK, gin.H{"message": "Dean logged in"})
 }
 
 func GetAvailableSessions(c *gin.Context) {
-	err := controller.ValidateToken(c)
+	_, err := controller.ValidateToken(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
@@ -131,16 +134,24 @@ func GetAvailableSessions(c *gin.Context) {
 }
 
 func GetPendingSessions(c *gin.Context) {
-	err := controller.ValidateToken(c)
+	uuidToken, err := controller.ValidateToken(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	tokenDetails, found := controller.ActiveTokenDetails[uuidToken]
+	if !found {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 		return
 	}
 
 	var sessions []model.Session
 
 	filter := bson.M{
-		"status": "pending",
+		"status":    "pending",
+		"dean_id":   tokenDetails.ID,
+		"dean_name": tokenDetails.Username,
 	}
 
 	cursor, err := db.SessionCollection.Find(db.Context, filter)
@@ -160,15 +171,11 @@ func GetPendingSessions(c *gin.Context) {
 }
 
 func BookSessionSlot(c *gin.Context) {
-	err := controller.ValidateToken(c)
+	uuidToken, err := controller.ValidateToken(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-
-	token := c.GetHeader("Authorization")
-	tokenParts := strings.Split(token, " ")
-	uuidToken := tokenParts[1]
 
 	tokenDetails, found := controller.ActiveTokenDetails[uuidToken]
 	if !found {
