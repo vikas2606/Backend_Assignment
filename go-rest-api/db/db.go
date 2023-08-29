@@ -4,16 +4,15 @@ package db
 
 import (
 	"context"
-	"example/go-rest-api/model"
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"gopkg.in/mgo.v2/bson"
 )
 
 var client *mongo.Client
 var Context context.Context
+var UserCollection *mongo.Collection
 var StudentCollection *mongo.Collection
 var SessionCollection *mongo.Collection
 var DeanCollection *mongo.Collection
@@ -36,30 +35,10 @@ func ConnectDB() {
 
 	fmt.Println("Connected to the database!")
 
+	UserCollection = client.Database("university").Collection("users")
 	StudentCollection = client.Database("university").Collection("students")
 	DeanCollection = client.Database("university").Collection("deans")
 	SessionCollection = client.Database("university").Collection("sessions")
 	AuthTokenCollection = client.Database("university").Collection("auth_tokens") // Add this line
 
-	printStudents()
-}
-
-func printStudents() {
-	cursor, err := StudentCollection.Find(context.Background(), bson.M{})
-	if err != nil {
-		fmt.Println("Error fetching students:", err)
-		return
-	}
-	defer cursor.Close(context.Background())
-
-	var students []model.Student
-	if err := cursor.All(context.Background(), &students); err != nil {
-		fmt.Println("Error decoding students:", err)
-		return
-	}
-
-	fmt.Println("List of students:")
-	for _, student := range students {
-		fmt.Printf("ID: %s, Username: %s\n", student.ID, student.Username)
-	}
 }

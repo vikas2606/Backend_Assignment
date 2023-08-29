@@ -4,14 +4,15 @@ import (
 	"example/go-rest-api/controller"
 	"example/go-rest-api/db"
 	"example/go-rest-api/model"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -28,8 +29,8 @@ func StudentLogin(c *gin.Context) {
 		return
 	}
 
-	var student model.Student
-	err := db.StudentCollection.FindOne(db.Context, bson.M{"username": loginData.Username, "password": loginData.Password}).Decode(&student)
+	var student model.User
+	err := db.UserCollection.FindOne(db.Context, bson.M{"username": loginData.Username, "password": loginData.Password, "type": "student"}).Decode(&student)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
@@ -41,20 +42,24 @@ func StudentLogin(c *gin.Context) {
 	// Calculate token expiration time
 	expiresAt := time.Now().Add(time.Second * tokenTTL)
 
-	// Store token in the database
-	tokenDoc := model.AuthToken{
-		StudentID: student.ID, // Assuming student.ID is an ObjectID
-		Token:     uuidToken,
-		ExpiresAt: expiresAt,
+	cookie := http.Cookie{
+		Name:     "student_token",
+		Value:    uuidToken,
+		Expires:  expiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
 	}
 
-	_, err = db.AuthTokenCollection.InsertOne(db.Context, tokenDoc)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store token"})
-		return
+	controller.ActiveTokens = append(controller.ActiveTokens, uuidToken)
+	controller.ActiveTokenDetails[uuidToken] = controller.TokenDetails{
+		ID:       student.ID,
+		Username: student.Username,
 	}
 
+	http.SetCookie(c.Writer, &cookie)
+	fmt.Println(controller.ActiveTokenDetails)
 	c.JSON(http.StatusOK, gin.H{"message": "Student logged in", "student_uuid": uuidToken})
+
 }
 
 func DeanLogin(c *gin.Context) {
@@ -68,8 +73,8 @@ func DeanLogin(c *gin.Context) {
 		return
 	}
 
-	var dean model.Dean
-	err := db.DeanCollection.FindOne(db.Context, bson.M{"username": loginData.Username, "password": loginData.Password}).Decode(&dean)
+	var dean model.User
+	err := db.UserCollection.FindOne(db.Context, bson.M{"username": loginData.Username, "password": loginData.Password, "type": "dean"}).Decode(&dean)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
@@ -82,40 +87,62 @@ func DeanLogin(c *gin.Context) {
 	expiresAt := time.Now().Add(time.Second * tokenTTL)
 
 	// Store token in the database
-	tokenDoc := model.AuthToken{
-		DeanID:    dean.ID, // Assuming student.ID is an ObjectID
-		Token:     uuidToken,
-		ExpiresAt: expiresAt,
+	cookie := http.Cookie{
+		Name:     "dean_token",
+		Value:    uuidToken,
+		Expires:  expiresAt,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
 	}
 
-	_, err = db.AuthTokenCollection.InsertOne(db.Context, tokenDoc)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store token"})
-		return
-	}
+	controller.ActiveTokens = append(controller.ActiveTokens, uuidToken)
 
-	c.JSON(http.StatusOK, gin.H{"message": "Dean logged in", "dean_uuid": uuidToken})
+	http.SetCookie(c.Writer, &cookie)
+	c.JSON(http.StatusOK, gin.H{"message": "Dean logged in"})
 }
 
 func GetAvailableSessions(c *gin.Context) {
-	auth, err := controller.ValidateToken(c)
+	err := controller.ValidateToken(c)
 	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var sessions []model.Session
 
-	filter := bson.M{}
+	filter := bson.M{
+		"status": "available",
+	}
 
-	if auth.StudentID != primitive.NilObjectID {
-		filter["status"] = "available"
-	} else if auth.DeanID != primitive.NilObjectID {
-		filter["status"] = "pending"
-
-	} else {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user"})
+	cursor, err := db.SessionCollection.Find(db.Context, filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch sessions"})
 		return
 	}
+	defer cursor.Close(db.Context)
+
+	if err := cursor.All(db.Context, &sessions); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode sessions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
+
+}
+
+func GetPendingSessions(c *gin.Context) {
+	err := controller.ValidateToken(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var sessions []model.Session
+
+	filter := bson.M{
+		"status": "pending",
+	}
+
 	cursor, err := db.SessionCollection.Find(db.Context, filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch sessions"})
@@ -133,9 +160,29 @@ func GetAvailableSessions(c *gin.Context) {
 }
 
 func BookSessionSlot(c *gin.Context) {
-	auth, err := controller.ValidateToken(c)
+	err := controller.ValidateToken(c)
 	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
+	}
+
+	token := c.GetHeader("Authorization")
+	tokenParts := strings.Split(token, " ")
+	uuidToken := tokenParts[1]
+
+	tokenDetails, found := controller.ActiveTokenDetails[uuidToken]
+	if !found {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		return
+	}
+
+	// Update the session fields with token details
+	update := bson.M{
+		"$set": bson.M{
+			"status":       "pending",
+			"student_id":   tokenDetails.ID,
+			"student_name": tokenDetails.Username,
+		},
 	}
 
 	sessionIDStr := c.Param("session_id")
@@ -152,16 +199,6 @@ func BookSessionSlot(c *gin.Context) {
 		return
 	}
 
-	// Fetch the student's username based on their ID
-	var student model.Student
-	err = db.StudentCollection.FindOne(db.Context, bson.M{"_id": auth.StudentID}).Decode(&student)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch student details"})
-		return
-	}
-
-	// Update the session status to "pending" and assign the student ID
-	update := bson.M{"$set": bson.M{"status": "pending", "student_id": auth.StudentID, "name": student.Username}}
 	_, err = db.SessionCollection.UpdateOne(db.Context, bson.M{"_id": session.ID}, update)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update session status"})
@@ -169,8 +206,6 @@ func BookSessionSlot(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":    "Session slot booked successfully",
-		"student_id": auth.StudentID.Hex(),
-		"username":   student.Username,
+		"message": "Session slot booked successfully",
 	})
 }

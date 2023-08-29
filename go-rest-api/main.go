@@ -15,9 +15,8 @@ func main() {
 	router.POST("/student/login", routes.StudentLogin)
 	router.POST("/dean/login", routes.DeanLogin)
 	router.GET("/sessions/available", routes.GetAvailableSessions)
+	router.GET("/sessions/pending", routes.GetPendingSessions)
 	router.POST("/sessions/book/:session_id", routes.BookSessionSlot)
-
-	// Define your API routes and handlers here
 
 	router.Run(":8080")
 }
