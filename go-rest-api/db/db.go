@@ -16,7 +16,7 @@ var UserCollection *mongo.Collection
 var StudentCollection *mongo.Collection
 var SessionCollection *mongo.Collection
 var DeanCollection *mongo.Collection
-var AuthTokenCollection *mongo.Collection // Add this line
+var AuthTokenCollection *mongo.Collection 
 
 func ConnectDB() {
 	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
@@ -39,6 +39,6 @@ func ConnectDB() {
 	StudentCollection = client.Database("university").Collection("students")
 	DeanCollection = client.Database("university").Collection("deans")
 	SessionCollection = client.Database("university").Collection("sessions")
-	AuthTokenCollection = client.Database("university").Collection("auth_tokens") // Add this line
+	AuthTokenCollection = client.Database("university").Collection("auth_tokens") 
 
 }
